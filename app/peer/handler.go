@@ -225,9 +225,13 @@ func (p2p *P2PNetwork) RequestBlockchainFromPeers() {
 				fmt.Println("Error decoding blockchain blocks:", err)
 				continue
 			}
+
+			fmt.Println("isi block", peerBlockchain)
+
 			p2p.Blockchain.SyncWithPeer(peerBlockchain.Blocks, peerBlockchain.Election)
 			fmt.Println("Synchronized blockchain with peer:", peer.Address)
 			break // Stop setelah sinkronisasi dengan satu peer
 		}
 	}
+
 }

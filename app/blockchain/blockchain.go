@@ -78,3 +78,16 @@ func (bc *Blockchain) SyncWithPeer(peerBlocks []Block, election *Election) {
 		bc.Election = election
 	}
 }
+
+// fungsi display blockchain untuk menampilkan blok-blok yang ada di blockchain
+func (bc *Blockchain) Display() {
+	for _, block := range bc.Blocks {
+		fmt.Printf("Index: %d\n", block.Index)
+		fmt.Printf("Timestamp: %d\n", block.Timestamp)
+		fmt.Printf("Data: %v\n", block.Data)
+		fmt.Printf("Hash: %x\n", block.Hash)
+		fmt.Printf("PrevHash: %x\n", block.PrevHash)
+		fmt.Printf("Nonce: %d\n", block.Nonce)
+		fmt.Println()
+	}
+}

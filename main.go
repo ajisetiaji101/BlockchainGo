@@ -2,15 +2,21 @@ package main
 
 import (
 	"bufio"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"myapp/app/blockchain"
 	"myapp/app/peer"
+	"myapp/app/pkg/hmac"
 	"myapp/app/pkg/signature"
+	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
+	"sync"
 	"syscall"
+	"time"
 )
 
 func main() {
@@ -55,9 +61,9 @@ func main() {
 	}
 
 	if *init {
-		p2p.Blockchain.Election.AddCandidate("Alice")
-		p2p.Blockchain.Election.AddCandidate("Bob")
-		p2p.Blockchain.Election.AddCandidate("Charlie")
+		p2p.Blockchain.Election.AddCandidate("AndiBudi")
+		p2p.Blockchain.Election.AddCandidate("CindyDinda")
+		p2p.Blockchain.Election.AddCandidate("ErlingFawaz")
 		println("prepare set genesis block")
 		if !p2p.Blockchain.SetGenesisBlock() {
 			p2p.BroadcastBlockchain()
@@ -70,8 +76,6 @@ func main() {
 	// Mendengarkan koneksi untuk menerima blok.
 	go p2p.ListenForBlocks(*address)
 
-	go handleUserInput(p2p)
-
 	// handling peer shutdown
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
@@ -80,6 +84,19 @@ func main() {
 		p2p.NotifyBootstrapOnShutdown()
 		os.Exit(0)
 	}()
+
+	// Daftarkan handler untuk setiap endpoint
+	http.HandleFunc("/vote", voteHandler)
+	http.HandleFunc("/showresult", showResultHandler)
+
+	// Jalankan server
+	fmt.Println("Server running on http://localhost:8084")
+
+	go func() {
+		http.ListenAndServe(":8082", nil)
+	}()
+
+	go handleUserInput(p2p)
 
 	// Menjaga agar program tetap berjalan.
 	select {}
@@ -111,7 +128,9 @@ func handleUserInput(p2p *peer.P2PNetwork) {
 		case "showresult":
 			fmt.Println("Hasil voting saat ini:")
 			p2p.Blockchain.Election.DisplayResults()
-
+		case "display":
+			fmt.Println("Blockchain saat ini:")
+			p2p.Blockchain.Display()
 		default:
 			fmt.Println("Perintah tidak dikenal:", args[0])
 		}
@@ -119,4 +138,165 @@ func handleUserInput(p2p *peer.P2PNetwork) {
 	if err := scanner.Err(); err != nil {
 		fmt.Println("Error membaca input:", err)
 	}
+}
+
+// Struktur Election
+type Election struct {
+	Candidates map[string]int
+	Voters     map[string]bool
+	mu         sync.Mutex // Untuk melindungi akses ke data
+}
+
+// Fungsi untuk membuat instance Election baru
+func NewElection(candidateList []string) *Election {
+	candidates := make(map[string]int)
+	for _, candidate := range candidateList {
+		candidates[candidate] = 0
+	}
+	return &Election{
+		Candidates: candidates,
+		Voters:     make(map[string]bool),
+	}
+}
+
+// Inisialisasi election instance
+var election = NewElection([]string{"AndiBudi", "CindyDinda", "ErlingFawaz"})
+
+// Fungsi untuk mencatat vote dan mengembalikan hasil sebagai string
+func (e *Election) Vote(voterID string, candidateID string) (string, string) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	// Cek apakah voter sudah memberikan suara
+	if e.Voters[voterID] {
+		msg := fmt.Sprintf("Voter %s sudah memberikan suara", voterID)
+		fmt.Println(msg)
+		return msg, "failed"
+	}
+
+	// Cek apakah kandidat valid
+	if _, exists := e.Candidates[candidateID]; !exists {
+		msg := fmt.Sprintf("Kandidat %s tidak valid", candidateID)
+		fmt.Println(msg)
+		return msg, "failed"
+	}
+
+	// Rekam suara
+	e.Voters[voterID] = true
+	e.Candidates[candidateID]++
+	return fmt.Sprintf("Vote berhasil untuk kandidat %s", candidateID), "success"
+}
+
+// Fungsi untuk menampilkan hasil voting
+func (e *Election) ShowResults() map[string]int {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	// Salin data hasil untuk dikembalikan
+	results := make(map[string]int)
+	for candidate, votes := range e.Candidates {
+		results[candidate] = votes
+	}
+	return results
+}
+
+// Handler untuk endpoint /vote
+func voteHandler(w http.ResponseWriter, r *http.Request) {
+
+	hmacSecret := r.Header.Get("X-HMAC")
+	fmt.Println("HMAC Secret: ", hmacSecret)
+
+	timeStampSecret := r.Header.Get("X-Timestamp")
+	fmt.Println("Timestamp Secret: ", timeStampSecret)
+
+	//ubah ke int64
+	timeStampSecretInt, _ := strconv.ParseInt(timeStampSecret, 10, 64)
+
+	// Verifikasi HMAC
+	if hmacSecret == "" {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"status": "failed",
+			"error":  "HMAC Secret is required",
+		})
+		return
+	}
+
+	// Verifikasi HMAC
+	hmac.VerifyHMAC(os.Getenv("HMAC_KEY_BLOCKCHAIN_ELECTION"), hmacSecret, timeStampSecretInt, 60)
+
+	if r.Method != http.MethodPost {
+		http.Error(w, "Invalid request method", http.StatusMethodNotAllowed)
+		return
+	}
+
+	//beri log
+	fmt.Println("Vote request received")
+
+	// Parse body request
+	var req struct {
+		VoterID     string `json:"voter_id"`
+		CandidateID string `json:"candidate_id"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"status": "failed",
+			"error":  err.Error(),
+		})
+		return
+	}
+
+	fmt.Printf("Vote request from %s for %s\n", req.VoterID, req.CandidateID)
+
+	msg, status := election.Vote(req.VoterID, req.CandidateID)
+
+	// Kirimkan respons dalam data JSON
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status": status,
+		"data":   msg,
+		"time":   time.Now().Format(time.RFC3339),
+	})
+}
+
+// Handler untuk endpoint /showresult
+func showResultHandler(w http.ResponseWriter, r *http.Request) {
+
+	hmacSecret := r.Header.Get("X-HMAC")
+	fmt.Println("HMAC Secret: ", hmacSecret)
+
+	timeStampSecret := r.Header.Get("X-Timestamp")
+	fmt.Println("Timestamp Secret: ", timeStampSecret)
+
+	//ubah ke int64
+	timeStampSecretInt, _ := strconv.ParseInt(timeStampSecret, 10, 64)
+
+	// Verifikasi HMAC
+	if hmacSecret == "" {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"status": "failed",
+			"error":  "HMAC Secret is required",
+		})
+		return
+	}
+
+	// Verifikasi HMAC
+	hmac.VerifyHMAC(os.Getenv("HMAC_KEY_BLOCKCHAIN_ELECTION"), hmacSecret, timeStampSecretInt, 60)
+
+	if r.Method != http.MethodGet {
+		http.Error(w, "Invalid request method", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Ambil hasil voting
+	results := election.ShowResults()
+
+	// Encode hasil ke JSON dan kirimkan sebagai respons
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"results": results,
+	})
 }
