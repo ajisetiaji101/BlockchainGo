@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"myapp/app/blockchain"
 	"net"
+	"strings"
 
 	"github.com/bytedance/sonic"
 )
@@ -28,6 +29,11 @@ type P2PNetwork struct {
 	localAddr  string // Alamat lokal peer
 	privateKey *ecdsa.PrivateKey
 	publicKey  []byte
+}
+
+type PeerResponseConnect struct {
+	status  string
+	message string
 }
 
 func NewP2PNetwork(bootstrap, localAddr string, privateKey *ecdsa.PrivateKey, publicKey []byte) *P2PNetwork {
@@ -61,12 +67,14 @@ func (p2p *P2PNetwork) RemovePeer(address string) {
 	fmt.Println(p2p.peers)
 }
 
-func (p2p *P2PNetwork) RegisterToBootstrap() error {
+func (p2p *P2PNetwork) RegisterToBootstrap() (string, error) {
 	conn, err := net.Dial("tcp", p2p.bootstrap)
 	if err != nil {
-		return fmt.Errorf("gagal terhubung ke bootstrap server: %v", err)
+		return "", fmt.Errorf("gagal terhubung ke bootstrap server: %v", err)
 	}
 	defer conn.Close()
+
+	reader := bufio.NewReader(conn)
 
 	var peer Peer = Peer{
 		Address:   p2p.localAddr,
@@ -75,7 +83,7 @@ func (p2p *P2PNetwork) RegisterToBootstrap() error {
 
 	payload, err := sonic.Marshal(peer)
 	if err != nil {
-		return fmt.Errorf("gagal melakukan marshal data: %v", err)
+		return "", fmt.Errorf("gagal melakukan marshal data: %v", err)
 	}
 
 	request := RegisterRequest{
@@ -84,7 +92,7 @@ func (p2p *P2PNetwork) RegisterToBootstrap() error {
 	}
 	data, err := sonic.Marshal(request)
 	if err != nil {
-		return fmt.Errorf("gagal melakukan marshal data: %v", err)
+		return "", fmt.Errorf("gagal melakukan marshal data: %v", err)
 	}
 
 	writer := bufio.NewWriter(conn)
@@ -92,12 +100,26 @@ func (p2p *P2PNetwork) RegisterToBootstrap() error {
 
 	_, err = writer.WriteString(string(data))
 	if err != nil {
-		return fmt.Errorf("gagal mengirim request: %v", err)
+		return "", fmt.Errorf("gagal mengirim request: %v", err)
 	}
 	writer.Flush()
 
-	fmt.Println("Berhasil mendaftar ke bootstrap server")
-	return nil
+	fmt.Println("Berhasil mengirim request ke bootstrap server")
+
+	// Membaca response dari server
+	response, err := reader.ReadString('\n')
+	if err != nil {
+		return "", fmt.Errorf("gagal membaca response: %v", err)
+	}
+
+	// Membersihkan karakter newline atau spasi ekstra
+	response = strings.TrimSpace(response)
+
+	if response == "" {
+		return "", fmt.Errorf("response dari server kosong")
+	}
+
+	return response, nil
 }
 
 func (p2p *P2PNetwork) NotifyBootstrapOnShutdown() {

@@ -61,6 +61,8 @@ func (p2p *P2PNetwork) GetPeersFromBootstrap() ([]Peer, error) {
 		return nil, fmt.Errorf("gagal membaca response: %v", err)
 	}
 
+	fmt.Println("response network:", response)
+
 	var peers []Peer
 
 	err = sonic.Unmarshal([]byte(strings.TrimSpace(response)), &peers)

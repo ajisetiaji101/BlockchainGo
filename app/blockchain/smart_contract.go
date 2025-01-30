@@ -10,6 +10,11 @@ type Election struct {
 	Voters     map[string]bool
 }
 
+type hasilVote struct {
+	Candidate string
+	Votes     int
+}
+
 func NewElection(candidates []string) *Election {
 	return &Election{
 		Candidates: candidates,

@@ -38,7 +38,18 @@ func main() {
 	}
 	println(string(publicKey))
 	p2p := peer.NewP2PNetwork(bootstrapAddress, *address, privateKey, publicKey)
-	p2p.RegisterToBootstrap()
+	peerConnect, err := p2p.RegisterToBootstrap()
+
+	if err != nil || peerConnect == "" || peerConnect != "Your IP address is Registered" {
+		if err == nil {
+			fmt.Println("Failed to connect to bootstrap server:", peerConnect)
+		} else {
+			fmt.Println(err)
+		}
+		os.Exit(1)
+	}
+
+	fmt.Println("Connected to bootstrap server:", peerConnect)
 
 	// Inisialisasi blockchain dengan instance Election
 	p2p.Blockchain = &blockchain.Blockchain{
@@ -86,11 +97,15 @@ func main() {
 	}()
 
 	// Daftarkan handler untuk setiap endpoint
-	http.HandleFunc("/vote", voteHandler)
-	http.HandleFunc("/showresult", showResultHandler)
+	http.HandleFunc("/vote", func(w http.ResponseWriter, r *http.Request) {
+		voteHandler(w, r, p2p)
+	})
+	http.HandleFunc("/showresult", func(w http.ResponseWriter, r *http.Request) {
+		showResultHandler(w, r, p2p)
+	})
 
 	// Jalankan server
-	fmt.Println("Server running on http://localhost:8084")
+	fmt.Println("Server running on http://localhost:8082")
 
 	go func() {
 		http.ListenAndServe(":8082", nil)
@@ -163,16 +178,9 @@ func NewElection(candidateList []string) *Election {
 var election = NewElection([]string{"AndiBudi", "CindyDinda", "ErlingFawaz"})
 
 // Fungsi untuk mencatat vote dan mengembalikan hasil sebagai string
-func (e *Election) Vote(voterID string, candidateID string) (string, string) {
+func (e *Election) Vote(voterID string, candidateID string, p2p *peer.P2PNetwork) (string, string) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-
-	// Cek apakah voter sudah memberikan suara
-	if e.Voters[voterID] {
-		msg := fmt.Sprintf("Voter %s sudah memberikan suara", voterID)
-		fmt.Println(msg)
-		return msg, "failed"
-	}
 
 	// Cek apakah kandidat valid
 	if _, exists := e.Candidates[candidateID]; !exists {
@@ -181,27 +189,12 @@ func (e *Election) Vote(voterID string, candidateID string) (string, string) {
 		return msg, "failed"
 	}
 
-	// Rekam suara
-	e.Voters[voterID] = true
-	e.Candidates[candidateID]++
-	return fmt.Sprintf("Vote berhasil untuk kandidat %s", candidateID), "success"
-}
-
-// Fungsi untuk menampilkan hasil voting
-func (e *Election) ShowResults() map[string]int {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-
-	// Salin data hasil untuk dikembalikan
-	results := make(map[string]int)
-	for candidate, votes := range e.Candidates {
-		results[candidate] = votes
-	}
-	return results
+	result, status := p2p.HandleVote(voterID, candidateID)
+	return result, status
 }
 
 // Handler untuk endpoint /vote
-func voteHandler(w http.ResponseWriter, r *http.Request) {
+func voteHandler(w http.ResponseWriter, r *http.Request, p2p *peer.P2PNetwork) {
 
 	hmacSecret := r.Header.Get("X-HMAC")
 	fmt.Println("HMAC Secret: ", hmacSecret)
@@ -250,7 +243,7 @@ func voteHandler(w http.ResponseWriter, r *http.Request) {
 
 	fmt.Printf("Vote request from %s for %s\n", req.VoterID, req.CandidateID)
 
-	msg, status := election.Vote(req.VoterID, req.CandidateID)
+	msg, status := election.Vote(req.VoterID, req.CandidateID, p2p)
 
 	// Kirimkan respons dalam data JSON
 	w.Header().Set("Content-Type", "application/json")
@@ -262,7 +255,7 @@ func voteHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // Handler untuk endpoint /showresult
-func showResultHandler(w http.ResponseWriter, r *http.Request) {
+func showResultHandler(w http.ResponseWriter, r *http.Request, p2p *peer.P2PNetwork) {
 
 	hmacSecret := r.Header.Get("X-HMAC")
 	fmt.Println("HMAC Secret: ", hmacSecret)
@@ -292,7 +285,7 @@ func showResultHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Ambil hasil voting
-	results := election.ShowResults()
+	results := p2p.Blockchain.Election.GetResults()
 
 	// Encode hasil ke JSON dan kirimkan sebagai respons
 	w.Header().Set("Content-Type", "application/json")

@@ -141,11 +141,11 @@ func (p2p *P2PNetwork) VerifyAndUpdateBlockchain(incoming *blockchain.Blockchain
 }
 
 // Fungsi untuk menangani suara dari voter dan menambahkan blok baru.
-func (p2p *P2PNetwork) HandleVote(voterID, candidateID string) {
+func (p2p *P2PNetwork) HandleVote(voterID, candidateID string) (string, string) {
 	for _, block := range p2p.Blockchain.Blocks {
 		if block.Data.VoterID == voterID {
 			fmt.Println("Voter already voted:", voterID)
-			return
+			return "Voter already voted", "failed"
 		}
 	}
 
@@ -176,14 +176,19 @@ func (p2p *P2PNetwork) HandleVote(voterID, candidateID string) {
 			err := p2p.Blockchain.Election.Vote(voterID, candidateID) // Pastikan Election ada di blockchain
 			if err != nil {
 				fmt.Println("Error while voting:", err)
+				return "Error while voting", "failed"
 			} else {
 				p2p.BroadcastBlockchain()
 				fmt.Println("Vote successful for voter:", voterID)
+				return "Vote successful", "success"
 			}
 		}
 	} else {
 		fmt.Println("Failed to validate block")
+		return "Failed to validate block", "failed"
 	}
+
+	return "Failed to add block", "failed"
 }
 
 func (p2p *P2PNetwork) RequestBlockchainFromPeers() {
