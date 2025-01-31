@@ -188,8 +188,8 @@ func (e *Election) Vote(voterID string, candidateID string, p2p *peer.P2PNetwork
 		return msg, "failed"
 	}
 
-	result, status := p2p.HandleVote(voterID, candidateID)
-	return result, status
+	go p2p.HandleVote(voterID, candidateID)
+	return "Vote telah dicatat", "success"
 }
 
 // Handler untuk endpoint /vote
